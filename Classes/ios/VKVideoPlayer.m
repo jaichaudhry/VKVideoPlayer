@@ -11,7 +11,7 @@
 #import "VKVideoPlayerTrack.h"
 #import "NSObject+VKFoundation.h"
 #import "VKVideoPlayerExternalMonitor.h"
-
+#import <Reachability/Reachability.h>
 
 #define VKCaptionPadding 10
 #define degreesToRadians(x) (M_PI * x / 180.0f)
@@ -46,6 +46,8 @@ typedef enum {
 @property (nonatomic, strong) id captionTopTimer;
 @property (nonatomic, strong) id captionBottomTimer;
 
+@property (nonatomic, assign) BOOL videoLoading;
+@property (nonatomic, assign) BOOL videoLoadedForFirstTime;
 
 @end
 
@@ -224,6 +226,7 @@ typedef enum {
 }
 
 - (void)reachabilityChanged:(NSNotification*)notification {
+    return; // Adding this so that the track is not reloaded when the internet source changes.
   Reachability* curReachability = notification.object;
   if (curReachability == VKSharedUtility.wifiReach) {
     DDLogVerbose(@"Reachability Changed: %@", [VKSharedUtility.wifiReach isReachableViaWiFi] ? @"Wifi Detected." : @"Cellular Detected.");
@@ -290,6 +293,10 @@ typedef enum {
   [self.view hideControlsIfNecessary];
   
   if ([self.delegate respondsToSelector:@selector(videoPlayer:didPlayFrame:time:lastTime:)]) {
+      if (!_videoLoadedForFirstTime) {
+          _videoLoadedForFirstTime = YES;
+          _videoLoading = NO;
+      }
     [self.delegate videoPlayer:self didPlayFrame:self.track time:timeInSeconds lastTime:lastTimeInSeconds];
   }
 }
@@ -386,6 +393,7 @@ typedef enum {
   };
 }
 - (void)loadVideoWithStreamURL:(NSURL*)streamURL {
+    _videoLoading = YES;
   [self loadVideoWithTrack:[[VKVideoPlayerTrack alloc] initWithStreamURL:streamURL]];
 }
 
@@ -484,6 +492,7 @@ typedef enum {
   [_playerItem removeObserver:self forKeyPath:@"status"];
   [_playerItem removeObserver:self forKeyPath:@"playbackBufferEmpty"];
   [_playerItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp"];
+  [_playerItem removeObserver:self forKeyPath:@"loadedTimeRanges"];
   [[NSNotificationCenter defaultCenter] removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:_playerItem];
   _playerItem = playerItem;
   _previousIndicatedBandwidth = 0.0f;
@@ -494,6 +503,7 @@ typedef enum {
   [_playerItem addObserver:self forKeyPath:@"status" options:0 context:&ItemStatusContext];
   [_playerItem addObserver:self forKeyPath:@"playbackBufferEmpty" options:NSKeyValueObservingOptionNew context:nil];
   [_playerItem addObserver:self forKeyPath:@"playbackLikelyToKeepUp" options:NSKeyValueObservingOptionNew context:nil];
+  [_playerItem addObserver:self forKeyPath:@"loadedTimeRanges" options:NSKeyValueObservingOptionNew context:nil];
   [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(playerDidPlayToEnd:) name:AVPlayerItemDidPlayToEndTimeNotification object:_playerItem];
   
 }
@@ -662,28 +672,43 @@ typedef enum {
   
   if (object == self.playerItem) {
     if ([keyPath isEqualToString:@"playbackBufferEmpty"]) {
-        if (self.playerItem.isPlaybackBufferEmpty && [self.delegate respondsToSelector:@selector(videoPlayer:isBuffering:)]) {
-            [self.delegate videoPlayer:self isBuffering:YES];
-        }
-        
       DDLogVerbose(@"playbackBufferEmpty: %@", self.playerItem.isPlaybackBufferEmpty ? @"yes" : @"no");
       if (self.playerItem.isPlaybackBufferEmpty && [self currentTime] > 0 && [self currentTime] < [self.player currentItemDuration] - 1 && self.state == VKVideoPlayerStateContentPlaying) {
+          _videoLoading = YES;
         [[NSNotificationCenter defaultCenter] postNotificationName:kVKVideoPlayerPlaybackBufferEmpty object:nil];
       }
     }
-    if ([keyPath isEqualToString:@"playbackLikelyToKeepUp"]) {
-        if (self.playerItem.playbackLikelyToKeepUp && [self.delegate respondsToSelector:@selector(videoPlayer:isBuffering:)]) {
-            [self.delegate videoPlayer:self isBuffering:NO];
-        }
-        
-      DDLogVerbose(@"playbackLikelyToKeepUp: %@", self.playerItem.playbackLikelyToKeepUp ? @"yes" : @"no");
-      if (self.playerItem.playbackLikelyToKeepUp) {
-        if (self.state == VKVideoPlayerStateContentPlaying && ![self isPlayingVideo]) {
-          [[NSNotificationCenter defaultCenter] postNotificationName:kVKVideoPlayerPlaybackLikelyToKeepUp object:nil];
-          [self.player play];
-        }
+//    if ([keyPath isEqualToString:@"playbackLikelyToKeepUp"]) {
+//      DDLogVerbose(@"playbackLikelyToKeepUp: %@", self.playerItem.playbackLikelyToKeepUp ? @"yes" : @"no");
+//      if (self.playerItem.playbackLikelyToKeepUp) {
+//        if (self.state == VKVideoPlayerStateContentPlaying && ![self isPlayingVideo]) {
+//            _videoLoading = NO;
+//          [[NSNotificationCenter defaultCenter] postNotificationName:kVKVideoPlayerPlaybackLikelyToKeepUp object:nil];
+//          [self.player play];
+//        }
+//      }
+//    }
+    
+      if ([keyPath isEqualToString:@"loadedTimeRanges"]) {
+          if (self.state == VKVideoPlayerStateContentPlaying && ![self isPlayingVideo]) {
+              NSArray * timeRangeArray = self.playerItem.loadedTimeRanges;
+              CMTimeRange aTimeRange = [[timeRangeArray objectAtIndex:0] CMTimeRangeValue];
+              double startTime = CMTimeGetSeconds(aTimeRange.start);
+              double loadedDuration = CMTimeGetSeconds(aTimeRange.duration);
+              double maxLoadedDuration = 0;
+              Reachability *internetReachability = [Reachability reachabilityForInternetConnection];
+              if ([internetReachability isReachableViaWiFi]) {
+                  maxLoadedDuration = 2;
+              } else if ([internetReachability isReachableViaWWAN]) {
+                  maxLoadedDuration = 2;
+              }
+              if (loadedDuration > maxLoadedDuration) {
+                _videoLoading = NO;
+                [[NSNotificationCenter defaultCenter] postNotificationName:kVKVideoPlayerPlaybackLikelyToKeepUp object:nil];
+                  [self.player play];
+              }
+          }
       }
-    }
     if ([keyPath isEqualToString:@"status"]) {
       switch ([self.playerItem status]) {
         case AVPlayerItemStatusReadyToPlay:
@@ -969,13 +994,17 @@ typedef enum {
 }
 
 - (void)playButtonPressed {
-  [self playContent];
+    if (!_videoLoading) {
+        [self playContent];
+    }
 }
 
 - (void)pauseButtonPressed {
   switch (self.state) {
     case VKVideoPlayerStateContentPlaying:
-      [self pauseContent:YES completionHandler:nil];
+          if (!_videoLoading) {
+            [self pauseContent:YES completionHandler:nil];
+          }
       break;
     default:
       break;
@@ -1055,6 +1084,7 @@ typedef enum {
 }
 
 - (void)setLoading:(BOOL)loading {
+    return; // Adding this so that extra loader is not shown when the video is loading.
   if (loading) {
     [self.view.activityIndicator startAnimating];
   } else {
@@ -1065,7 +1095,8 @@ typedef enum {
 #pragma mark - Handle volume change
 
 - (void)volumeChanged:(NSNotification *)notification {
-  self.view.controlHideCountdown = [self.view.playerControlsAutoHideTime integerValue];
+    return;
+//  self.view.controlHideCountdown = [self.view.playerControlsAutoHideTime integerValue];
 }
 
 
@@ -1290,7 +1321,6 @@ typedef enum {
 
 - (CGFloat)degreesForOrientation:(UIInterfaceOrientation)deviceOrientation {
   switch (deviceOrientation) {
-    case UIInterfaceOrientationUnknown:
     case UIInterfaceOrientationPortrait:
       return 0;
       break;
