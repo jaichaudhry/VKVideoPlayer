@@ -26,9 +26,7 @@
 @property (nonatomic, strong) NSMutableArray* customControls;
 @property (nonatomic, strong) NSMutableArray* portraitControls;
 @property (nonatomic, strong) NSMutableArray* landscapeControls;
-
-@property (nonatomic, assign) BOOL isControlsEnabled;
-@property (nonatomic, assign) BOOL isControlsHidden;
+@property (nonatomic, assign) BOOL isPaused;
 @end
 
 @implementation VKVideoPlayerView
@@ -301,11 +299,16 @@
 }
 
 - (IBAction)handleSingleTap:(id)sender {
-  [self setControlsHidden:!self.isControlsHidden];
-  if (!self.isControlsHidden) {
-    self.controlHideCountdown = [self.playerControlsAutoHideTime integerValue];
-  }
-  [self.delegate playerViewSingleTapped];
+    if (self.isPaused)  {
+        [self.delegate playButtonPressed];
+        self.isPaused = NO;
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"videoPlayNotification" object:nil];
+    } else {
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"videoPauseNotification" object:nil];
+        [self.delegate pauseButtonPressed];
+        self.isPaused = YES;
+    }
+    return;
 }
 
 - (IBAction)handleSwipeLeft:(id)sender {
@@ -338,7 +341,7 @@
 
 - (void)setControlsHidden:(BOOL)hidden {
   DDLogVerbose(@"Controls: %@", hidden ? @"hidden" : @"visible");
-
+    hidden = YES;
   if (self.isControlsHidden != hidden) {
     self.isControlsHidden = hidden;
     self.controls.hidden = hidden;
