@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
 
   s.name         = "VKVideoPlayer"
-  s.version      = "0.1.4"
+  s.version      = "0.2"
   s.summary      = "VKVideoPlayer is customizable video player component that is able to play mp4, hls videos and display subtitles."
 
   s.description  = <<-DESC
@@ -28,7 +28,7 @@ Pod::Spec.new do |s|
 
   s.platform     = :ios, "5.0"
   s.ios.deployment_target = '5.0'
-  s.source       = { :git => "https://github.com/jaichaudhry/VKVideoPlayer.git" }
+  s.source       = { :git => "https://github.com/jaichaudhry/VKVideoPlayer.git", :tag => s.version }
 
   s.source_files = 'Classes/ios/*.{h,m}'
 
