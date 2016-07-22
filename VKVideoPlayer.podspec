@@ -44,6 +44,6 @@ Pod::Spec.new do |s|
 
   s.dependency 'DTCoreText', '~> 1.6.11'
   s.dependency 'CocoaLumberjack', '~> 2.0'
-  s.dependency 'VKFoundation', :git => 'https://github.com/jaichaudhry/VKFoundation.git'
+  s.dependency 'VKFoundation'
 
 end
